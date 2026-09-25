@@ -3,10 +3,10 @@ services:
     image: ghcr.io/paulohgodinho/telegram-forwarder:latest
     environment:
       WEB_AUTH_PORT: ${WEB_AUTH_PORT:-56899}
-      APP_ID: ${APP_ID}
-      APP_HASH: ${APP_HASH}
-      TG_PHONE: ${TG_PHONE}
-      N8N_WEBHOOK_URL: ${N8N_WEBHOOK_URL}
+      TELEGRAM_APP_ID: ${TELEGRAM_APP_ID}
+      TELEGRAM_APP_HASH: ${TELEGRAM_APP_HASH}
+      TELEGRAM_TG_PHONE: ${TELEGRAM_TG_PHONE}
+      TELEGRAM_N8N_WEBHOOK_URL: ${TELEGRAM_N8N_WEBHOOK_URL}
     ports:
       - "${WEB_AUTH_PORT:-56899}:${WEB_AUTH_PORT:-56899}"
     volumes:

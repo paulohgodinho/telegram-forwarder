@@ -41,19 +41,19 @@ var peerDB *pebble.PeerStorage
 
 func run(ctx context.Context) error {
 	// 1. Environment Configuration
-	appID, err := strconv.Atoi(os.Getenv("APP_ID"))
+	appID, err := strconv.Atoi(os.Getenv("TELEGRAM_APP_ID"))
 	if err != nil {
-		return errors.Wrap(err, "invalid APP_ID")
+		return errors.Wrap(err, "invalid TELEGRAM_APP_ID")
 	}
-	appHash := os.Getenv("APP_HASH")
-	phone := os.Getenv("TG_PHONE")
+	appHash := os.Getenv("TELEGRAM_APP_HASH")
+	phone := os.Getenv("TELEGRAM_TG_PHONE")
 	webAuthPort := os.Getenv("WEB_AUTH_PORT")
 	if webAuthPort == "" {
 		webAuthPort = "56899"
 	}
-	n8nWebhook = os.Getenv("N8N_WEBHOOK_URL")
+	n8nWebhook = os.Getenv("TELEGRAM_N8N_WEBHOOK_URL")
 	if n8nWebhook == "" {
-		return errors.New("N8N_WEBHOOK_URL is required")
+		return errors.New("TELEGRAM_N8N_WEBHOOK_URL is required")
 	}
 
 	// 2. Storage & Session Directory Setup
