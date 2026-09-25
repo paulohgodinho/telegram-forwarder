@@ -13,11 +13,12 @@ RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
     go build -trimpath -ldflags='-s -w' -o /out/telegram-forwarder .
 
 FROM scratch
+WORKDIR /app
 
 # Include TLS root certificates for outbound HTTPS connections
 COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
 
-# Copy the compiled binary
-COPY --from=builder /out/telegram-forwarder /telegram-forwarder
+# Copy the compiled binary into the mounted app directory
+COPY --from=builder /out/telegram-forwarder /app/telegram-forwarder
 
-ENTRYPOINT ["/telegram-forwarder"]
+ENTRYPOINT ["/app/telegram-forwarder"]

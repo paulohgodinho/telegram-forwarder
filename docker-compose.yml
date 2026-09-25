@@ -1,8 +1,6 @@
 services:
   telegram-forwarder:
-    build:
-      context: .
-      dockerfile: Dockerfile
+    image: ghcr.io/paulohgodinho/telegram-forwarder:latest
     environment:
       WEB_AUTH_PORT: ${WEB_AUTH_PORT:-56899}
       APP_ID: ${APP_ID}
@@ -11,6 +9,8 @@ services:
       N8N_WEBHOOK_URL: ${N8N_WEBHOOK_URL}
     ports:
       - "${WEB_AUTH_PORT:-56899}:${WEB_AUTH_PORT:-56899}"
+    volumes:
+      - telegram-forwarder-session:/app/session
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.telegram-forwarder.rule=Host(`telegram-forwarder.internal.ghomelab.top`)"
@@ -18,3 +18,6 @@ services:
       - "traefik.docker.network=traefik-network"
     container_name: telegram-forwarder
     restart: unless-stopped
+
+volumes:
+  telegram-forwarder-session:
