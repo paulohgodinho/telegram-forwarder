@@ -12,14 +12,11 @@ COPY . .
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
     go build -trimpath -ldflags='-s -w' -o /out/telegram-forwarder .
 
-FROM scratch
+FROM alpine:3.20
 WORKDIR /app
 
-# Include TLS root certificates and Docker DNS resolver files so service names like "n8n" resolve correctly.
-COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
-COPY --from=builder /etc/resolv.conf /etc/resolv.conf
-COPY --from=builder /etc/hosts /etc/hosts
-COPY --from=builder /etc/nsswitch.conf /etc/nsswitch.conf
+# Provide the standard CA bundle and DNS/runtime files needed for Docker names like "n8n" and outbound HTTPS.
+RUN apk add --no-cache ca-certificates
 
 # Copy the compiled binary into the mounted app directory
 COPY --from=builder /out/telegram-forwarder /app/telegram-forwarder
