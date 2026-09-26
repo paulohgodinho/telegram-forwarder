@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"io"
 	"log"
 	"log/slog"
 	"net/http"
@@ -216,7 +217,19 @@ func forwardToN8N(url string, payload N8NPayload) {
 		"date", payload.Date,
 	)
 
-	resp, err := http.Post(url, "application/json", bytes.NewBuffer(data))
+	client := &http.Client{Timeout: 10 * time.Second}
+	req, err := http.NewRequest(http.MethodPost, url, bytes.NewReader(data))
+	if err != nil {
+		slog.Error("failed to construct n8n request",
+			"url", url,
+			"sender", payload.Sender,
+			"error", err,
+		)
+		return
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := client.Do(req)
 	if err != nil {
 		slog.Error("failed to send message to n8n",
 			"url", url,
@@ -229,12 +242,26 @@ func forwardToN8N(url string, payload N8NPayload) {
 	defer resp.Body.Close()
 
 	statusText := http.StatusText(resp.StatusCode)
+	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode >= http.StatusBadRequest {
+		slog.Error("n8n webhook rejected request",
+			"url", url,
+			"status_code", resp.StatusCode,
+			"status_text", statusText,
+			"sender", payload.Sender,
+			"text", payload.Text,
+			"response_body", string(body),
+		)
+		return
+	}
+
 	slog.Info("n8n delivery result",
 		"url", url,
 		"status_code", resp.StatusCode,
 		"status_text", statusText,
 		"sender", payload.Sender,
 		"text", payload.Text,
+		"response_body", string(body),
 	)
 }
 

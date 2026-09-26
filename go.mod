@@ -7,7 +7,6 @@ require (
 	github.com/go-faster/errors v0.8.0
 	github.com/gotd/contrib v0.25.0
 	github.com/gotd/td v0.162.0
-	github.com/gotd/td/examples v0.0.0-20260918101526-be24580163e1
 	go.etcd.io/bbolt v1.5.0
 	golang.org/x/time v0.15.0
 )
@@ -42,11 +41,8 @@ require (
 	github.com/kr/text v0.2.0 // indirect
 	github.com/mattn/go-colorable v0.1.15 // indirect
 	github.com/mattn/go-isatty v0.0.22 // indirect
-	github.com/mdp/qrterminal/v3 v3.2.1 // indirect
 	github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 // indirect
 	github.com/ogen-go/ogen v1.23.0 // indirect
-	github.com/pion/randutil v0.1.0 // indirect
-	github.com/pion/rtp v1.10.5 // indirect
 	github.com/pkg/errors v0.9.1 // indirect
 	github.com/prometheus/client_golang v1.23.2 // indirect
 	github.com/prometheus/client_model v0.6.2 // indirect
@@ -70,7 +66,6 @@ require (
 	golang.org/x/net v0.57.0 // indirect
 	golang.org/x/sync v0.22.0 // indirect
 	golang.org/x/sys v0.47.0 // indirect
-	golang.org/x/term v0.45.0 // indirect
 	golang.org/x/text v0.40.0 // indirect
 	golang.org/x/tools v0.48.0 // indirect
 	google.golang.org/protobuf v1.36.11 // indirect

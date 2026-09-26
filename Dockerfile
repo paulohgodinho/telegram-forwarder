@@ -15,8 +15,11 @@ RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
 FROM scratch
 WORKDIR /app
 
-# Include TLS root certificates for outbound HTTPS connections
+# Include TLS root certificates and Docker DNS resolver files so service names like "n8n" resolve correctly.
 COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
+COPY --from=builder /etc/resolv.conf /etc/resolv.conf
+COPY --from=builder /etc/hosts /etc/hosts
+COPY --from=builder /etc/nsswitch.conf /etc/nsswitch.conf
 
 # Copy the compiled binary into the mounted app directory
 COPY --from=builder /out/telegram-forwarder /app/telegram-forwarder
