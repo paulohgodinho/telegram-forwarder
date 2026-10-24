@@ -88,3 +88,37 @@ func TestPeerDisplayName(t *testing.T) {
 		})
 	}
 }
+
+func TestTruncateRunes(t *testing.T) {
+	cases := []struct {
+		name string
+		s    string
+		n    int
+		want string
+	}{
+		{name: "shorter than limit", s: "hello", n: 40, want: "hello"},
+		{name: "exactly at limit", s: "01234567890123456789012345678901234567890123456789"[:40], n: 40, want: "01234567890123456789012345678901234567890123456789"[:40]},
+		{name: "longer than limit", s: "0123456789012345678901234567890123456789extra", n: 40, want: "0123456789012345678901234567890123456789"},
+		{name: "multi-byte runes not split", s: repeatEmoji(45), n: 40, want: repeatEmoji(40)},
+		{name: "empty string", s: "", n: 40, want: ""},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := truncateRunes(tc.s, tc.n)
+			if got != tc.want {
+				t.Fatalf("truncateRunes(%q, %d) = %q, want %q", tc.s, tc.n, got, tc.want)
+			}
+		})
+	}
+}
+
+// repeatEmoji builds n repetitions of a multi-byte rune, used to verify
+// truncateRunes counts runes, not bytes.
+func repeatEmoji(n int) string {
+	r := make([]rune, n)
+	for i := range r {
+		r[i] = '🙂'
+	}
+	return string(r)
+}

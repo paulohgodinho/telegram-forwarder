@@ -139,8 +139,13 @@ func attrValue(v slog.Value) any {
 	}
 }
 
-// setupLogging installs the pretty-JSON handler as slog's default, writing
-// to out at minLevel (e.g. os.Stdout, slog.LevelInfo).
+// n8nLogger is the only logger that renders pretty (multi-line) JSON; every
+// other log site uses the compact, single-line default installed below.
+var n8nLogger *slog.Logger
+
+// setupLogging installs a compact single-line JSON handler as slog's
+// default, and a separate pretty-JSON n8nLogger for n8n delivery logs.
 func setupLogging(out io.Writer, minLevel slog.Leveler) {
-	slog.SetDefault(slog.New(newPrettyJSONHandler(out, minLevel)))
+	slog.SetDefault(slog.New(slog.NewJSONHandler(out, &slog.HandlerOptions{Level: minLevel})))
+	n8nLogger = slog.New(newPrettyJSONHandler(out, minLevel))
 }

@@ -79,3 +79,45 @@ type testError struct{ msg string }
 func (e *testError) Error() string { return e.msg }
 
 var errBoom = &testError{msg: "boom"}
+
+func TestSetupLoggingDefaultIsSingleLineJSON(t *testing.T) {
+	var buf bytes.Buffer
+	prevDefault, prevN8N := slog.Default(), n8nLogger
+	t.Cleanup(func() { slog.SetDefault(prevDefault); n8nLogger = prevN8N })
+
+	setupLogging(&buf, slog.LevelInfo)
+	slog.Info("hello", "foo", "bar")
+
+	out := strings.TrimRight(buf.String(), "\n")
+	if strings.Contains(out, "\n") {
+		t.Fatalf("expected single-line output, got:\n%s", out)
+	}
+	var decoded map[string]any
+	if err := json.Unmarshal([]byte(out), &decoded); err != nil {
+		t.Fatalf("output is not valid JSON: %v\n%s", err, out)
+	}
+	if decoded["foo"] != "bar" {
+		t.Fatalf("unexpected decoded fields: %+v", decoded)
+	}
+}
+
+func TestSetupLoggingN8NLoggerIsPrettyMultiLineJSON(t *testing.T) {
+	var buf bytes.Buffer
+	prevDefault, prevN8N := slog.Default(), n8nLogger
+	t.Cleanup(func() { slog.SetDefault(prevDefault); n8nLogger = prevN8N })
+
+	setupLogging(&buf, slog.LevelInfo)
+	n8nLogger.Info("n8n delivery result", "image_url", "https://example.com/x.jpg")
+
+	out := buf.String()
+	if !strings.Contains(out, "\n") {
+		t.Fatalf("expected multi-line output, got:\n%s", out)
+	}
+	var decoded map[string]any
+	if err := json.Unmarshal([]byte(out), &decoded); err != nil {
+		t.Fatalf("output is not valid JSON: %v\n%s", err, out)
+	}
+	if decoded["image_url"] != "https://example.com/x.jpg" {
+		t.Fatalf("expected image_url to be logged, got: %+v", decoded)
+	}
+}

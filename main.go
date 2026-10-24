@@ -203,6 +203,19 @@ func peerDisplayName(peer storage.Peer) string {
 	return peer.String()
 }
 
+// messagePreviewLen bounds how much of a message's text is logged.
+const messagePreviewLen = 40
+
+// truncateRunes returns the first n runes of s, unchanged if already
+// shorter (counts runes, not bytes, so multi-byte text isn't cut mid-char).
+func truncateRunes(s string, n int) string {
+	r := []rune(s)
+	if len(r) <= n {
+		return s
+	}
+	return string(r[:n])
+}
+
 func handleMessage(ctx context.Context, e tg.Entities, msg *tg.Message) error {
 	if msg.Out {
 		slog.Debug("ignoring outgoing message", "peer_id", msg.GetPeerID(), "text", msg.Message)
@@ -255,11 +268,8 @@ func handleMessage(ctx context.Context, e tg.Entities, msg *tg.Message) error {
 	}
 
 	slog.Info("received telegram message",
-		"sender", senderName,
-		"text", msg.Message,
-		"date", payload.Date,
-		"peer_id", msg.GetPeerID(),
-		"image_url", imageURL,
+		"channel", groupName,
+		"message", truncateRunes(msg.Message, messagePreviewLen),
 	)
 
 	// Non-blocking POST dispatch to n8n
@@ -267,26 +277,30 @@ func handleMessage(ctx context.Context, e tg.Entities, msg *tg.Message) error {
 	return nil
 }
 
+// forwardToN8N POSTs payload to the n8n webhook. These are the only log
+// entries rendered as pretty (multi-line) JSON, via n8nLogger.
 func forwardToN8N(url string, payload N8NPayload) {
 	data, err := json.Marshal(payload)
 	if err != nil {
-		slog.Error("failed to marshal n8n payload", "error", err, "payload", payload)
+		n8nLogger.Error("failed to marshal n8n payload", "error", err, "payload", payload)
 		return
 	}
 
-	slog.Info("attempting to send message to n8n",
+	n8nLogger.Info("attempting to send message to n8n",
 		"url", url,
 		"sender", payload.Sender,
 		"text", payload.Text,
 		"date", payload.Date,
+		"image_url", payload.ImageURL,
 	)
 
 	client := &http.Client{Timeout: 10 * time.Second}
 	req, err := http.NewRequest(http.MethodPost, url, bytes.NewReader(data))
 	if err != nil {
-		slog.Error("failed to construct n8n request",
+		n8nLogger.Error("failed to construct n8n request",
 			"url", url,
 			"sender", payload.Sender,
+			"image_url", payload.ImageURL,
 			"error", err,
 		)
 		return
@@ -295,10 +309,11 @@ func forwardToN8N(url string, payload N8NPayload) {
 
 	resp, err := client.Do(req)
 	if err != nil {
-		slog.Error("failed to send message to n8n",
+		n8nLogger.Error("failed to send message to n8n",
 			"url", url,
 			"sender", payload.Sender,
 			"text", payload.Text,
+			"image_url", payload.ImageURL,
 			"error", err,
 		)
 		return
@@ -308,23 +323,25 @@ func forwardToN8N(url string, payload N8NPayload) {
 	statusText := http.StatusText(resp.StatusCode)
 	body, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode >= http.StatusBadRequest {
-		slog.Error("n8n webhook rejected request",
+		n8nLogger.Error("n8n webhook rejected request",
 			"url", url,
 			"status_code", resp.StatusCode,
 			"status_text", statusText,
 			"sender", payload.Sender,
 			"text", payload.Text,
+			"image_url", payload.ImageURL,
 			"response_body", string(body),
 		)
 		return
 	}
 
-	slog.Info("n8n delivery result",
+	n8nLogger.Info("n8n delivery result",
 		"url", url,
 		"status_code", resp.StatusCode,
 		"status_text", statusText,
 		"sender", payload.Sender,
 		"text", payload.Text,
+		"image_url", payload.ImageURL,
 		"response_body", string(body),
 	)
 }

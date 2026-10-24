@@ -50,18 +50,33 @@ Telegram's update stream can develop gaps (e.g. after downtime) that are recover
 | `telegram channel state missing locally, channel skipped` | A channel's access hash wasn't found; it's skipped until rediscovered. See note below. |
 | `telegram update state not found locally, resynced from server` | No local update state on startup; a full resync was performed. |
 
-Previously these conditions were silently discarded (the underlying library defaults to a no-op logger). All internal connection/reconnect/gap diagnostics now flow through the same pretty-JSON logger, tagged with `"component": "gotd"`.
+Previously these conditions were silently discarded (the underlying library defaults to a no-op logger). All internal connection/reconnect/gap diagnostics now flow through the default logger, tagged with `"component": "gotd"`.
 
 **On "channel state missing locally":** the update manager persists each channel's `pts` (via bbolt), but by default persists channel/user *access hashes* only in memory — wiped on every restart, so every previously-tracked group/channel got skipped on every deploy. We now persist access hashes in bbolt too (`access_hash_storage.go`), so this only fires for a channel the very first time, not on every restart.
 
 ## Logging
 
-All logs are structured, pretty-printed JSON written to stdout (one indented JSON object per entry), e.g.:
+All logs are structured JSON written to stdout. Most entries are compact, single-line JSON:
+
+```json
+{"time":"2026-10-23T23:43:58-03:00","level":"INFO","msg":"telegram heartbeat ok"}
+```
+
+The "received telegram message" log is intentionally narrow — just the channel name and the first 40 characters of the message:
+
+```json
+{"time":"2026-10-23T23:43:58-03:00","level":"INFO","msg":"received telegram message","channel":"Family Group","message":"hey, check out this photo from the trip"}
+```
+
+The only exception is n8n delivery logs (`forwardToN8N`), which are pretty-printed (multi-line) and include the uploaded image's URL when present:
 
 ```json
 {
+  "image_url": "https://offers-storage.web.internal.ghomelab.top/photos/2026/10/23/123.jpg",
   "level": "INFO",
-  "msg": "telegram heartbeat ok",
-  "time": "2026-10-23T23:43:58-03:00"
+  "msg": "n8n delivery result",
+  "sender": "Jane Doe",
+  "status_code": 200,
+  "text": "hey, check out this photo from the trip"
 }
 ```
