@@ -1,2 +1,5 @@
 .env
 session
+pics
+.vscode
+telegram-forwarder

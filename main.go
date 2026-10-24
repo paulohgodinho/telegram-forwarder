@@ -12,6 +12,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 
 	pebbledb "github.com/cockroachdb/pebble"
@@ -35,10 +36,12 @@ type N8NPayload struct {
 	GroupName string    `json:"group_name"` // Empty string "" if 1-on-1 private chat
 	Text      string    `json:"text"`
 	Date      time.Time `json:"date"`
+	ImageURL  string    `json:"image_url,omitempty"` // Public S3 URL, set only if the message had a photo and upload succeeded
 }
 
 var n8nWebhook string
 var peerDB *pebble.PeerStorage
+var tgClient *telegram.Client
 
 func run(ctx context.Context) error {
 	// 1. Environment Configuration
@@ -55,6 +58,10 @@ func run(ctx context.Context) error {
 	n8nWebhook = os.Getenv("TELEGRAM_N8N_WEBHOOK_URL")
 	if n8nWebhook == "" {
 		return errors.New("TELEGRAM_N8N_WEBHOOK_URL is required")
+	}
+
+	if err := configureS3(); err != nil {
+		return errors.Wrap(err, "configure S3")
 	}
 
 	// 2. Storage & Session Directory Setup
@@ -120,6 +127,7 @@ func run(ctx context.Context) error {
 	}
 
 	client := telegram.NewClient(appID, appHash, options)
+	tgClient = client
 
 	// 5. Auth Flow & Execution Engine
 	log.Println("Starting Telegram auth flow via web form")
@@ -155,6 +163,34 @@ func run(ctx context.Context) error {
 	})
 }
 
+// peerDisplayName resolves a human-friendly name (channel/group title, or
+// user first+last name / username) from a persisted storage.Peer.
+func peerDisplayName(peer storage.Peer) string {
+	switch {
+	case peer.Channel != nil:
+		if title := strings.TrimSpace(peer.Channel.Title); title != "" {
+			return title
+		}
+		if peer.Channel.Username != "" {
+			return "@" + peer.Channel.Username
+		}
+	case peer.Chat != nil:
+		if title := strings.TrimSpace(peer.Chat.Title); title != "" {
+			return title
+		}
+	case peer.User != nil:
+		if name := strings.TrimSpace(peer.User.FirstName + " " + peer.User.LastName); name != "" {
+			return name
+		}
+		if peer.User.Username != "" {
+			return "@" + peer.User.Username
+		}
+	}
+	// Fallback: no friendly name available (e.g. forbidden/min entity), use
+	// the debug representation so we at least know the kind/ID.
+	return peer.String()
+}
+
 func handleMessage(ctx context.Context, e tg.Entities, msg *tg.Message) error {
 	if msg.Out {
 		slog.Debug("ignoring outgoing message", "peer_id", msg.GetPeerID(), "text", msg.Message)
@@ -168,20 +204,34 @@ func handleMessage(ctx context.Context, e tg.Entities, msg *tg.Message) error {
 	switch p := msg.GetPeerID().(type) {
 	case *tg.PeerChat, *tg.PeerChannel:
 		if peer, err := storage.FindPeer(ctx, peerDB, p); err == nil {
-			groupName = peer.String()
+			groupName = peerDisplayName(peer)
 		}
 	}
 
 	// 2. Resolve Sender Name
 	if msg.FromID != nil {
 		if peer, err := storage.FindPeer(ctx, peerDB, msg.FromID); err == nil {
-			senderName = peer.String()
+			senderName = peerDisplayName(peer)
 		}
 	} else if peer, err := storage.FindPeer(ctx, peerDB, msg.GetPeerID()); err == nil {
 		// Fallback to chat/user peer
-		senderName = peer.String()
+		senderName = peerDisplayName(peer)
 	} else if groupName != "" {
 		senderName = groupName
+	}
+
+	// 3. If the message carries a photo, upload it to S3 (with retries built
+	// into uploadPhoto) and attach the resulting public URL to the payload.
+	// A failed upload is logged but must never prevent the message itself
+	// from being forwarded to n8n.
+	imageURL := ""
+	if photoMedia, ok := msg.Media.(*tg.MessageMediaPhoto); ok {
+		url, err := uploadPhoto(ctx, photoMedia)
+		if err != nil {
+			slog.Error("failed to upload photo", "error", err, "sender", senderName)
+		} else {
+			imageURL = url
+		}
 	}
 
 	payload := N8NPayload{
@@ -189,6 +239,7 @@ func handleMessage(ctx context.Context, e tg.Entities, msg *tg.Message) error {
 		GroupName: groupName,
 		Text:      msg.Message,
 		Date:      time.Unix(int64(msg.Date), 0),
+		ImageURL:  imageURL,
 	}
 
 	slog.Info("received telegram message",
@@ -196,6 +247,7 @@ func handleMessage(ctx context.Context, e tg.Entities, msg *tg.Message) error {
 		"text", msg.Message,
 		"date", payload.Date,
 		"peer_id", msg.GetPeerID(),
+		"image_url", imageURL,
 	)
 
 	// Non-blocking POST dispatch to n8n
