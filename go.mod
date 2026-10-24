@@ -9,6 +9,7 @@ require (
 	github.com/cockroachdb/pebble v1.1.5
 	github.com/go-faster/errors v0.8.0
 	github.com/gotd/contrib v0.25.0
+	github.com/gotd/log v0.1.0
 	github.com/gotd/td v0.162.0
 	go.etcd.io/bbolt v1.5.0
 	golang.org/x/time v0.15.0
@@ -46,7 +47,6 @@ require (
 	github.com/golang/snappy v0.0.4 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/gotd/ige v0.3.0 // indirect
-	github.com/gotd/log v0.1.0 // indirect
 	github.com/gotd/neo v0.1.5 // indirect
 	github.com/klauspost/compress v1.19.1 // indirect
 	github.com/kr/pretty v0.3.1 // indirect

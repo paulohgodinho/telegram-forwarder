@@ -36,6 +36,21 @@ On first run, open `http://<host>:${WEB_AUTH_PORT}` and submit the login code se
 - Photo uploads are retried up to 3 times. If all attempts fail, the error is logged and the message is still forwarded to n8n without an `image_url` — a failed upload never blocks forwarding.
 - Only photo attachments (`MessageMediaPhoto`) are uploaded; other media types are ignored for now.
 - A heartbeat pings Telegram every minute and logs the result (success or failure) to verify the connection is alive.
+- New messages are handled for every chat type: private DMs and basic groups (`OnNewMessage`, including short-form updates the library normalizes internally) and supergroups/channels (`OnNewChannelMessage`). Edited messages, service messages (joins/pins/etc.), and non-photo media are intentionally not forwarded yet.
+
+## Update gap visibility
+
+Telegram's update stream can develop gaps (e.g. after downtime) that are recovered via `getDifference`. If a gap is too large to replay, messages sent during it are permanently lost from the update stream — this is tracked **per chat** for groups/channels, so a busy group can hit this independently of other chats. We log every such event so missing messages are explainable instead of silent:
+
+| Log message | Meaning |
+|---|---|
+| `telegram update gap too long for channel, messages were lost` | A specific group/channel/supergroup's gap could not be replayed; messages from that chat during the gap are gone. |
+| `telegram account-wide update gap too long, messages were lost` | Same as above, but for the account-wide (DM/basic-group) update stream. |
+| `telegram channel became inaccessible, stopped tracking it` | We lost access to a group/channel (kicked, banned, or it was deleted). |
+| `telegram channel state missing locally, channel skipped` | Local state for a channel was lost; it's skipped until rediscovered. |
+| `telegram update state not found locally, resynced from server` | No local update state on startup; a full resync was performed. |
+
+Previously these conditions were silently discarded (the underlying library defaults to a no-op logger). All internal connection/reconnect/gap diagnostics now flow through the same pretty-JSON logger, tagged with `"component": "gotd"`.
 
 ## Logging
 

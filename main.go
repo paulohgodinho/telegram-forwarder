@@ -93,8 +93,15 @@ func run(ctx context.Context) error {
 	updateHandler := storage.UpdateHook(dispatcher, peerDB)
 
 	updatesRecovery := updates.New(updates.Config{
-		Handler: updateHandler,
-		Storage: boltstor.NewStateStorage(boltdb),
+		Handler:                         updateHandler,
+		Storage:                         boltstor.NewStateStorage(boltdb),
+		Logger:                          gotdLogger(),
+		OnChannelTooLong:                onChannelTooLong,
+		OnChannelInaccessible:           onChannelInaccessible,
+		OnTooLong:                       onTooLong,
+		OnLoadUserStateFailed:           onLoadUserStateFailed,
+		OnLoadChannelStateFailed:        onLoadChannelStateFailed,
+		MaxChannelDifferenceConcurrency: maxChannelDifferenceConcurrency,
 	})
 
 	waiter := floodwait.NewWaiter()
@@ -118,6 +125,7 @@ func run(ctx context.Context) error {
 	options := telegram.Options{
 		SessionStorage: sessionStorage,
 		UpdateHandler:  updatesRecovery,
+		Logger:         gotdLogger(),
 		Middlewares: []telegram.Middleware{
 			waiter,
 			updhook.AffectedHook(updatesRecovery),
