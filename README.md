@@ -35,7 +35,7 @@ On first run, open `http://<host>:${WEB_AUTH_PORT}` and submit the login code se
 
 - Photo uploads are retried up to 3 times. If all attempts fail, the error is logged and the message is still forwarded to n8n without an `image_url` — a failed upload never blocks forwarding.
 - Only photo attachments (`MessageMediaPhoto`) are uploaded; other media types are ignored for now.
-- A heartbeat pings Telegram every 10s and logs the result (success or failure) to verify the connection is alive.
+- A heartbeat pings Telegram every minute and logs the result (success or failure) to verify the connection is alive.
 
 ## Logging
 

@@ -7,7 +7,7 @@ import (
 )
 
 // heartbeatInterval is how often we verify the Telegram connection is alive.
-const heartbeatInterval = 10 * time.Second
+const heartbeatInterval = time.Minute
 
 // heartbeatPingTimeout bounds each individual ping attempt.
 const heartbeatPingTimeout = 5 * time.Second
