@@ -1,6 +1,11 @@
 package main
 
 import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"log/slog"
+	"strings"
 	"testing"
 
 	"github.com/gotd/contrib/storage"
@@ -121,4 +126,52 @@ func repeatEmoji(n int) string {
 		r[i] = '🙂'
 	}
 	return string(r)
+}
+
+func TestLogPanicWritesStructuredEntry(t *testing.T) {
+	var buf bytes.Buffer
+	logger := slog.New(slog.NewJSONHandler(&buf, &slog.HandlerOptions{Level: slog.LevelInfo}))
+
+	logPanic(logger, "some operation", "boom")
+
+	var decoded map[string]any
+	if err := json.Unmarshal(buf.Bytes(), &decoded); err != nil {
+		t.Fatalf("output not valid JSON: %v\n%s", err, buf.String())
+	}
+	if decoded["level"] != "ERROR" {
+		t.Fatalf("expected ERROR level, got %v", decoded["level"])
+	}
+	if decoded["where"] != "some operation" {
+		t.Fatalf("expected where=%q, got %v", "some operation", decoded["where"])
+	}
+	if decoded["panic"] != "boom" {
+		t.Fatalf("expected panic=%q, got %v", "boom", decoded["panic"])
+	}
+	stack, _ := decoded["stack"].(string)
+	if !strings.Contains(stack, "goroutine") {
+		t.Fatalf("expected a stack trace, got: %q", stack)
+	}
+}
+
+func TestSafeHandleMessageRecoversPanicAndReturnsNil(t *testing.T) {
+	var buf bytes.Buffer
+	prevDefault := slog.Default()
+	t.Cleanup(func() { slog.SetDefault(prevDefault) })
+	slog.SetDefault(slog.New(slog.NewJSONHandler(&buf, &slog.HandlerOptions{Level: slog.LevelInfo})))
+
+	// A nil *tg.Message makes handleMessage panic on msg.Out, proving a
+	// malformed/unexpected message is contained instead of crashing the
+	// whole process.
+	err := safeHandleMessage(context.Background(), tg.Entities{}, nil)
+	if err != nil {
+		t.Fatalf("expected recovered panic to yield nil error, got: %v", err)
+	}
+
+	var decoded map[string]any
+	if jsonErr := json.Unmarshal(buf.Bytes(), &decoded); jsonErr != nil {
+		t.Fatalf("expected a panic log entry, output not valid JSON: %v\n%s", jsonErr, buf.String())
+	}
+	if decoded["where"] != "handling message" {
+		t.Fatalf("expected where=%q, got %v", "handling message", decoded["where"])
+	}
 }

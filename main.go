@@ -4,12 +4,14 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
+	"runtime/debug"
 	"strconv"
 	"strings"
 	"time"
@@ -113,14 +115,14 @@ func run(ctx context.Context) error {
 	// Register message listener
 	dispatcher.OnNewMessage(func(ctx context.Context, e tg.Entities, u *tg.UpdateNewMessage) error {
 		if msg, ok := u.Message.(*tg.Message); ok {
-			return handleMessage(ctx, e, msg)
+			return safeHandleMessage(ctx, e, msg)
 		}
 		return nil
 	})
 
 	dispatcher.OnNewChannelMessage(func(ctx context.Context, e tg.Entities, u *tg.UpdateNewChannelMessage) error {
 		if msg, ok := u.Message.(*tg.Message); ok {
-			return handleMessage(ctx, e, msg)
+			return safeHandleMessage(ctx, e, msg)
 		}
 		return nil
 	})
@@ -216,6 +218,28 @@ func truncateRunes(s string, n int) string {
 	return string(r[:n])
 }
 
+// logPanic writes a structured log entry for a recovered panic value r,
+// tagged with where it happened, including a stack trace.
+func logPanic(logger *slog.Logger, where string, r any) {
+	logger.Error("panic recovered",
+		"where", where,
+		"panic", fmt.Sprint(r),
+		"stack", string(debug.Stack()),
+	)
+}
+
+// safeHandleMessage calls handleMessage, recovering any panic so one bad
+// message can't crash the whole process (unrecovered panics are fatal).
+func safeHandleMessage(ctx context.Context, e tg.Entities, msg *tg.Message) (err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			logPanic(slog.Default(), "handling message", r)
+			err = nil
+		}
+	}()
+	return handleMessage(ctx, e, msg)
+}
+
 func handleMessage(ctx context.Context, e tg.Entities, msg *tg.Message) error {
 	if msg.Out {
 		slog.Debug("ignoring outgoing message", "peer_id", msg.GetPeerID(), "text", msg.Message)
@@ -277,9 +301,15 @@ func handleMessage(ctx context.Context, e tg.Entities, msg *tg.Message) error {
 	return nil
 }
 
-// forwardToN8N POSTs payload to the n8n webhook. These are the only log
-// entries rendered as pretty (multi-line) JSON, via n8nLogger.
+// forwardToN8N POSTs payload to the n8n webhook (pretty multi-line logs via
+// n8nLogger). Runs in its own goroutine per message, so panics are recovered.
 func forwardToN8N(url string, payload N8NPayload) {
+	defer func() {
+		if r := recover(); r != nil {
+			logPanic(n8nLogger, "forwarding to n8n", r)
+		}
+	}()
+
 	data, err := json.Marshal(payload)
 	if err != nil {
 		n8nLogger.Error("failed to marshal n8n payload", "error", err, "payload", payload)

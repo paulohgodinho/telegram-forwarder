@@ -54,6 +54,13 @@ Previously these conditions were silently discarded (the underlying library defa
 
 **On "channel state missing locally":** the update manager persists each channel's `pts` (via bbolt), but by default persists channel/user *access hashes* only in memory — wiped on every restart, so every previously-tracked group/channel got skipped on every deploy. We now persist access hashes in bbolt too (`access_hash_storage.go`), so this only fires for a channel the very first time, not on every restart.
 
+## Panic recovery
+
+An unrecovered panic anywhere in Go crashes the *entire* process, not just the goroutine it occurred in — and a raw panic stack trace bypasses structured logging entirely. Both places that process one message at a time recover from panics and log them as `"msg": "panic recovered"` (with `where`, the panic value, and a stack trace) instead of crashing:
+
+- The dispatcher's message handler (`safeHandleMessage`), covering `handleMessage` and everything it calls (peer resolution, photo upload).
+- The per-message `forwardToN8N` goroutine.
+
 ## Logging
 
 All logs are structured JSON written to stdout. Most entries are compact, single-line JSON:
