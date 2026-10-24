@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"io"
-	"log"
 	"log/slog"
 	"net/http"
 	"os"
@@ -130,12 +129,11 @@ func run(ctx context.Context) error {
 	tgClient = client
 
 	// 5. Auth Flow & Execution Engine
-	log.Println("Starting Telegram auth flow via web form")
-	slog.Info("Starting Telegram auth flow via web form")
+	slog.Info("starting telegram auth flow via web form")
 	wa := NewWebAuth(phone, ":"+webAuthPort)
 	go func() {
 		if err := wa.Serve(); err != nil && err != http.ErrServerClosed {
-			log.Printf("web auth server error: %v", err)
+			slog.Error("web auth server error", "error", err)
 		}
 	}()
 	flow := auth.NewFlow(wa, auth.SendCodeOptions{})
@@ -150,13 +148,15 @@ func run(ctx context.Context) error {
 			if err != nil {
 				return errors.Wrap(err, "get self failed")
 			}
-			log.Printf("Logged in as %s (@%s)", self.FirstName, self.Username)
+			slog.Info("logged in to telegram", "first_name", self.FirstName, "username", self.Username)
+
+			startHeartbeat(ctx, client, heartbeatInterval)
 
 			// Start update processing loop
 			return updatesRecovery.Run(ctx, client.API(), self.ID, updates.AuthOptions{
 				IsBot: self.Bot,
 				OnStart: func(ctx context.Context) {
-					log.Println("Listener running. Forwarding incoming messages to n8n...")
+					slog.Info("listener running, forwarding incoming messages to n8n")
 				},
 			})
 		})
@@ -318,14 +318,17 @@ func forwardToN8N(url string, payload N8NPayload) {
 }
 
 func main() {
+	setupLogging(os.Stdout, slog.LevelInfo)
+
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer cancel()
 
 	if err := run(ctx); err != nil {
 		if errors.Is(err, context.Canceled) {
-			log.Println("Terminated by user.")
+			slog.Info("terminated by user")
 			os.Exit(0)
 		}
-		log.Fatalf("Runtime error: %+v", err)
+		slog.Error("runtime error", "error", err)
+		os.Exit(1)
 	}
 }
