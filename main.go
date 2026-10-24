@@ -92,9 +92,13 @@ func run(ctx context.Context) error {
 	dispatcher := tg.NewUpdateDispatcher()
 	updateHandler := storage.UpdateHook(dispatcher, peerDB)
 
+	accessHasher := newBoltAccessHasher(boltdb)
+
 	updatesRecovery := updates.New(updates.Config{
 		Handler:                         updateHandler,
 		Storage:                         boltstor.NewStateStorage(boltdb),
+		AccessHasher:                    accessHasher,
+		UserAccessHasher:                accessHasher,
 		Logger:                          gotdLogger(),
 		OnChannelTooLong:                onChannelTooLong,
 		OnChannelInaccessible:           onChannelInaccessible,

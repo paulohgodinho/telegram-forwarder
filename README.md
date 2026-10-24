@@ -47,10 +47,12 @@ Telegram's update stream can develop gaps (e.g. after downtime) that are recover
 | `telegram update gap too long for channel, messages were lost` | A specific group/channel/supergroup's gap could not be replayed; messages from that chat during the gap are gone. |
 | `telegram account-wide update gap too long, messages were lost` | Same as above, but for the account-wide (DM/basic-group) update stream. |
 | `telegram channel became inaccessible, stopped tracking it` | We lost access to a group/channel (kicked, banned, or it was deleted). |
-| `telegram channel state missing locally, channel skipped` | Local state for a channel was lost; it's skipped until rediscovered. |
+| `telegram channel state missing locally, channel skipped` | A channel's access hash wasn't found; it's skipped until rediscovered. See note below. |
 | `telegram update state not found locally, resynced from server` | No local update state on startup; a full resync was performed. |
 
 Previously these conditions were silently discarded (the underlying library defaults to a no-op logger). All internal connection/reconnect/gap diagnostics now flow through the same pretty-JSON logger, tagged with `"component": "gotd"`.
+
+**On "channel state missing locally":** the update manager persists each channel's `pts` (via bbolt), but by default persists channel/user *access hashes* only in memory — wiped on every restart, so every previously-tracked group/channel got skipped on every deploy. We now persist access hashes in bbolt too (`access_hash_storage.go`), so this only fires for a channel the very first time, not on every restart.
 
 ## Logging
 
