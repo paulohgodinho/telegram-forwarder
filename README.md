@@ -24,7 +24,9 @@ Gets messages from Telegram (via [Telethon](https://docs.telethon.dev/)) and for
 
 ## Running
 
-The container uses `network_mode: host`, sharing the host machine's network stack (including `/etc/resolv.conf`) directly - so `TELEGRAM_N8N_WEBHOOK_URL` resolves hostnames (e.g. `http://n8n:5678/...`) exactly as the host itself would, with no Docker bridge network or port mapping involved. `WEB_AUTH_PORT` binds directly on the host.
+The container bind-mounts the host's `/etc/resolv.conf` read-only, so it uses the exact same DNS resolver(s) as the host - letting `TELEGRAM_N8N_WEBHOOK_URL` resolve hostnames (e.g. `http://n8n:5678/...`) without needing `network_mode: host` or a specific Docker network to exist. Normal bridge networking and port mapping still apply.
+
+**Caveat:** if the host uses systemd-resolved (common on Ubuntu/Debian), `/etc/resolv.conf` typically points to the local stub `127.0.0.53` - mounting that file verbatim won't help, since `127.0.0.53` inside the container's own network namespace has nothing listening. Check with `cat /etc/resolv.conf` on the host: if it shows a real LAN/upstream DNS IP, the mount works as-is; if it shows `127.0.0.53` (or any `127.x`), replace the bind mount with an explicit `dns:` entry in `docker-compose.yml` pointing at the real upstream resolver (`resolvectl status` on the host shows it).
 
 ```sh
 docker compose up -d --build

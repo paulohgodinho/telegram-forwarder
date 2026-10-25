@@ -4,9 +4,6 @@ services:
     build:
       context: .
       target: runtime
-    # Shares the host's network stack (incl. /etc/resolv.conf), so
-    # hostnames like "n8n" resolve exactly as they do on the host.
-    network_mode: host
     environment:
       WEB_AUTH_PORT: ${WEB_AUTH_PORT:-56899}
       TELEGRAM_APP_ID: ${TELEGRAM_APP_ID}
@@ -18,8 +15,13 @@ services:
       S3_ACCESS_KEY_ID: ${S3_ACCESS_KEY_ID}
       S3_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY}
       S3_PUBLIC_BASE_URL: ${S3_PUBLIC_BASE_URL:-https://offers-storage.web.internal.ghomelab.top}
+    ports:
+      - "${WEB_AUTH_PORT:-56899}:${WEB_AUTH_PORT:-56899}"
     volumes:
       - telegram-forwarder-session:/app/session
+      # Shares the host's DNS resolver without sharing its whole network
+      # stack. See README's "Running" section for the systemd-resolved caveat.
+      - /etc/resolv.conf:/etc/resolv.conf:ro
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.telegram-forwarder.rule=Host(`telegram-forwarder.internal.ghomelab.top`)"
