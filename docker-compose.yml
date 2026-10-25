@@ -1,11 +1,13 @@
 services:
   telegram-forwarder:
     image: ghcr.io/paulohgodinho/telegram-forwarder:latest
+    build:
+      context: .
+      target: runtime
     environment:
       WEB_AUTH_PORT: ${WEB_AUTH_PORT:-56899}
       TELEGRAM_APP_ID: ${TELEGRAM_APP_ID}
       TELEGRAM_APP_HASH: ${TELEGRAM_APP_HASH}
-      TELEGRAM_TG_PHONE: ${TELEGRAM_TG_PHONE}
       TELEGRAM_N8N_WEBHOOK_URL: ${TELEGRAM_N8N_WEBHOOK_URL}
       S3_ENDPOINT_URL: ${S3_ENDPOINT_URL}
       S3_REGION: ${S3_REGION:-garage}

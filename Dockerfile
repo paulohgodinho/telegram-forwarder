@@ -1,24 +1,35 @@
 # syntax=docker/dockerfile:1
 
-FROM golang:1.26-alpine AS builder
-WORKDIR /src
-
-# Copy dependency metadata first for better caching
-COPY go.mod go.sum* ./
-RUN go mod download
-
-# Copy the rest of the source and build a static Linux binary
-COPY . .
-RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
-    go build -trimpath -ldflags='-s -w' -o /out/telegram-forwarder .
-
-FROM alpine:3.20
+FROM ghcr.io/astral-sh/uv:python3.13-bookworm-slim AS base
 WORKDIR /app
+ENV UV_COMPILE_BYTECODE=1 \
+    UV_LINK_MODE=copy \
+    PYTHONUNBUFFERED=1
+COPY pyproject.toml uv.lock ./
 
-# Provide the standard CA bundle and DNS/runtime files needed for Docker names like "n8n" and outbound HTTPS.
-RUN apk add --no-cache ca-certificates
+# ---- deps: prod-only dependencies, cached independently of app code ----
+FROM base AS deps
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv sync --frozen --no-dev --no-install-project
 
-# Copy the compiled binary into the mounted app directory
-COPY --from=builder /out/telegram-forwarder /app/telegram-forwarder
+# ---- test: dev deps + project code, runs the pytest suite ----
+FROM base AS test
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv sync --frozen --no-install-project
+COPY . .
+RUN --mount=type=cache,target=/root/.cache/uv uv sync --frozen
+ENV PATH="/app/.venv/bin:${PATH}"
+CMD ["uv", "run", "pytest"]
 
-ENTRYPOINT ["/app/telegram-forwarder"]
+# ---- runtime: prod deps + project only, no dev deps, non-root user ----
+FROM deps AS runtime
+COPY . .
+RUN --mount=type=cache,target=/root/.cache/uv uv sync --frozen --no-dev
+RUN useradd --create-home --uid 1000 appuser \
+    # Pre-create the volume mount point so Docker seeds a fresh named
+    # volume as appuser-writable, not root:root.
+    && mkdir -p /app/session/data \
+    && chown -R appuser:appuser /app
+USER appuser
+ENV PATH="/app/.venv/bin:${PATH}"
+ENTRYPOINT ["python", "main.py"]

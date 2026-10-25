@@ -1,6 +1,6 @@
 # telegram-forwarder
 
-Gets messages from Telegram using MTProto and forwards them to an n8n webhook. Photo attachments are uploaded to an S3-compatible bucket (e.g. Garage) and their public URL is included in the forwarded payload.
+Gets messages from Telegram (via [Telethon](https://docs.telethon.dev/)) and forwards them to an n8n webhook. Photo attachments are uploaded to an S3-compatible bucket (e.g. Garage) and their public URL is included in the forwarded payload.
 
 ## Required environment variables
 
@@ -8,7 +8,6 @@ Gets messages from Telegram using MTProto and forwards them to an n8n webhook. P
 |---|---|
 | `TELEGRAM_APP_ID` | Telegram API app ID (from [my.telegram.org](https://my.telegram.org)) |
 | `TELEGRAM_APP_HASH` | Telegram API app hash |
-| `TELEGRAM_TG_PHONE` | Phone number used to log in (MTProto auth flow) |
 | `TELEGRAM_N8N_WEBHOOK_URL` | n8n webhook URL that messages are forwarded to |
 | `S3_ENDPOINT_URL` | S3-compatible endpoint used to store photo attachments (e.g. `https://garage-s3.internal.ghomelab.top`) |
 | `S3_REGION` | S3 region (e.g. `garage`) |
@@ -21,65 +20,72 @@ Gets messages from Telegram using MTProto and forwards them to an n8n webhook. P
 
 | Variable | Default | Description |
 |---|---|---|
-| `WEB_AUTH_PORT` | `56899` | Port for the one-time web form used to submit the Telegram login code |
+| `WEB_AUTH_PORT` | `56899` | Port for the one-time web form used to log in |
 
 ## Running
 
 ```sh
-docker compose up -d
+docker compose up -d --build
 ```
 
-On first run, open `http://<host>:${WEB_AUTH_PORT}` and submit the login code sent to your Telegram account to complete authentication. The session is persisted in the `telegram-forwarder-session` volume, so this is only needed once.
+On first run, open `http://<host>:${WEB_AUTH_PORT}` and complete the login flow: phone number, then the code sent to your Telegram account, then your 2FA password if you have one enabled. The session is persisted in the `telegram-forwarder-session` volume, so this is only needed once.
+
+## Testing
+
+All dependencies install only inside Docker - nothing is installed on the host. The pytest suite runs in its own build stage:
+
+```sh
+docker compose -f docker-compose.test.yml build
+docker compose -f docker-compose.test.yml run --rm tests
+```
+
+## Development notes
+
+- `uv.lock` is checked in and must be regenerated inside Docker if `pyproject.toml` changes: `docker run --rm -v "$PWD":/app -w /app ghcr.io/astral-sh/uv:python3.13-bookworm-slim uv lock`.
+- The `Dockerfile` has three stages: `deps` (prod-only, cached), `test` (adds dev deps + runs pytest), `runtime` (prod deps + app, non-root user). `docker compose build` targets `runtime` by default.
 
 ## Behavior notes
 
-- Photo uploads are retried up to 3 times. If all attempts fail, the error is logged and the message is still forwarded to n8n without an `image_url` — a failed upload never blocks forwarding.
-- Only photo attachments (`MessageMediaPhoto`) are uploaded; other media types are ignored for now.
-- A heartbeat pings Telegram every minute and logs the result (success or failure) to verify the connection is alive.
-- New messages are handled for every chat type: private DMs and basic groups (`OnNewMessage`, including short-form updates the library normalizes internally) and supergroups/channels (`OnNewChannelMessage`). Edited messages, service messages (joins/pins/etc.), and non-photo media are intentionally not forwarded yet.
+- **Every** message is forwarded, including ones you send yourself (no incoming-only filter) - this mirrors a straightforward `events.NewMessage` listener, covering DMs, basic groups, supergroups, and channels alike.
+- Photo uploads are retried up to 3 times. If all attempts fail, the error is logged and the message is still forwarded to n8n without an `image_url` - a failed upload never blocks forwarding.
+- Only photo attachments are uploaded; other media types are ignored for now.
+- A heartbeat pings Telegram every minute (a raw MTProto `PingRequest`) and logs the result, success or failure.
+- The Telegram session (auth key, entity access hashes, update state) is persisted via Telethon's own SQLite session file in the mounted volume, so it survives restarts without the custom access-hash bookkeeping a from-scratch implementation would otherwise need.
+- Shutdown (`SIGINT`/`SIGTERM`, e.g. `docker stop`) cancels the main task directly rather than waiting for the library to notice a disconnect - this keeps shutdown bounded even if an in-flight Telegram RPC never resolves.
 
-## Update gap visibility
+## n8n payload shape
 
-Telegram's update stream can develop gaps (e.g. after downtime) that are recovered via `getDifference`. If a gap is too large to replay, messages sent during it are permanently lost from the update stream — this is tracked **per chat** for groups/channels, so a busy group can hit this independently of other chats. We log every such event so missing messages are explainable instead of silent:
+Matches field-for-field what a sender would expect regardless of implementation language:
 
-| Log message | Meaning |
-|---|---|
-| `telegram update gap too long for channel, messages were lost` | A specific group/channel/supergroup's gap could not be replayed; messages from that chat during the gap are gone. |
-| `telegram account-wide update gap too long, messages were lost` | Same as above, but for the account-wide (DM/basic-group) update stream. |
-| `telegram channel became inaccessible, stopped tracking it` | We lost access to a group/channel (kicked, banned, or it was deleted). |
-| `telegram channel state missing locally, channel skipped` | A channel's access hash wasn't found; it's skipped until rediscovered. See note below. |
-| `telegram update state not found locally, resynced from server` | No local update state on startup; a full resync was performed. |
+```json
+{"sender": "Jane Doe", "group_name": "Family Group", "text": "hello", "date": "2026-10-24T12:00:00Z", "image_url": "https://.../photos/2026/10/24/123.jpg"}
+```
 
-Previously these conditions were silently discarded (the underlying library defaults to a no-op logger). All internal connection/reconnect/gap diagnostics now flow through the default logger, tagged with `"component": "gotd"`.
+`group_name` is `""` for private chats. `image_url` is omitted entirely when the message has no photo (or the upload failed).
 
-**On "channel state missing locally":** the update manager persists each channel's `pts` (via bbolt), but by default persists channel/user *access hashes* only in memory — wiped on every restart, so every previously-tracked group/channel got skipped on every deploy. We now persist access hashes in bbolt too (`access_hash_storage.go`), so this only fires for a channel the very first time, not on every restart.
+## S3 key scheme
 
-## Panic recovery
-
-An unrecovered panic anywhere in Go crashes the *entire* process, not just the goroutine it occurred in — and a raw panic stack trace bypasses structured logging entirely. Both places that process one message at a time recover from panics and log them as `"msg": "panic recovered"` (with `where`, the panic value, and a stack trace) instead of crashing:
-
-- The dispatcher's message handler (`safeHandleMessage`), covering `handleMessage` and everything it calls (peer resolution, photo upload).
-- The per-message `forwardToN8N` goroutine.
+Photos are uploaded to `photos/YYYY/MM/DD/<photo_id>.jpg`, sharded by the photo's own date (not the message's), so listings stay browsable and sorted without one huge flat prefix.
 
 ## Logging
 
 All logs are structured JSON written to stdout. Most entries are compact, single-line JSON:
 
 ```json
-{"time":"2026-10-23T23:43:58-03:00","level":"INFO","msg":"telegram heartbeat ok"}
+{"time": "2026-10-24T23:43:58Z", "level": "INFO", "msg": "telegram heartbeat ok"}
 ```
 
-The "received telegram message" log is intentionally narrow — just the channel name and the first 40 characters of the message:
+The "received telegram message" log is intentionally narrow - just the channel name and the first 40 characters of the message:
 
 ```json
-{"time":"2026-10-23T23:43:58-03:00","level":"INFO","msg":"received telegram message","channel":"Family Group","message":"hey, check out this photo from the trip"}
+{"time": "2026-10-24T23:43:58Z", "level": "INFO", "msg": "received telegram message", "channel": "Family Group", "message": "hey, check out this photo from the trip"}
 ```
 
-The only exception is n8n delivery logs (`forwardToN8N`), which are pretty-printed (multi-line) and include the uploaded image's URL when present:
+The only exception is n8n delivery logs, which are pretty-printed (multi-line, alphabetically-sorted keys) and include the uploaded image's URL when present:
 
 ```json
 {
-  "image_url": "https://offers-storage.web.internal.ghomelab.top/photos/2026/10/23/123.jpg",
+  "image_url": "https://offers-storage.web.internal.ghomelab.top/photos/2026/10/24/123.jpg",
   "level": "INFO",
   "msg": "n8n delivery result",
   "sender": "Jane Doe",
@@ -87,3 +93,9 @@ The only exception is n8n delivery logs (`forwardToN8N`), which are pretty-print
   "text": "hey, check out this photo from the trip"
 }
 ```
+
+Telethon's own internal logger is routed into the same compact handler (tagged via `base_logger="telethon"`), so connection/reconnect diagnostics are visible instead of silently discarded.
+
+## Exception isolation
+
+Every message is handled through `safe_handle_message`, which catches any exception and logs it as `"msg": "exception recovered"` (with `where`, `error`, and a full traceback) instead of letting it propagate - one bad message can't take down the listener or affect any other message. The same pattern wraps the n8n delivery call and the asyncio loop's own exception handler.

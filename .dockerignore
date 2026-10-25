@@ -1,0 +1,12 @@
+.git
+.github
+.vscode
+session
+.env
+__pycache__
+*.pyc
+.pytest_cache
+.venv
+*.session
+*.session-journal
+README.md
