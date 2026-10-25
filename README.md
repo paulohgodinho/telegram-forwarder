@@ -24,6 +24,8 @@ Gets messages from Telegram (via [Telethon](https://docs.telethon.dev/)) and for
 
 ## Running
 
+The container joins the external `traefik-network` so it can resolve `TELEGRAM_N8N_WEBHOOK_URL` by container name (e.g. `http://n8n:5678/...`) - that network must already exist and have your n8n container attached to it, otherwise you'll get `Name or service not known` when forwarding. If your n8n lives on a different network, change the `networks:` section in `docker-compose.yml` to match.
+
 ```sh
 docker compose up -d --build
 ```

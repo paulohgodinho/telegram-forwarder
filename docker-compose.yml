@@ -24,8 +24,14 @@ services:
       - "traefik.http.routers.telegram-forwarder.rule=Host(`telegram-forwarder.internal.ghomelab.top`)"
       - "traefik.http.services.telegram-forwarder.loadbalancer.server.port=${WEB_AUTH_PORT:-56899}"
       - "traefik.docker.network=traefik-network"
+    networks:
+      - traefik-network
     container_name: telegram-forwarder
     restart: unless-stopped
+
+networks:
+  traefik-network:
+    external: true
 
 volumes:
   telegram-forwarder-session:
