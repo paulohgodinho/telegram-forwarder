@@ -24,6 +24,7 @@ logger = logging.getLogger("forwarder")
 
 SESSION_DIR = Path("session/data")
 SESSION_NAME = "forwarder"
+AUTH_POLL_INTERVAL_SECONDS = 1
 
 
 def install_exception_handler(loop: asyncio.AbstractEventLoop) -> None:
@@ -55,6 +56,15 @@ def install_signal_handlers(loop: asyncio.AbstractEventLoop, main_task: asyncio.
         loop.add_signal_handler(sig, shutdown)
 
 
+async def wait_until_authorized(client: TelegramClient) -> None:
+    """Blocks until the web login flow completes. run_until_disconnected()
+    internally calls GetStateRequest(), which requires a logged-in session -
+    calling it before login finishes raises AuthKeyUnregisteredError.
+    """
+    while not await client.is_user_authorized():
+        await asyncio.sleep(AUTH_POLL_INTERVAL_SECONDS)
+
+
 async def run(n8n_logger: logging.Logger) -> None:
     config = Config.from_env()
     SESSION_DIR.mkdir(parents=True, exist_ok=True)
@@ -83,11 +93,6 @@ async def run(n8n_logger: logging.Logger) -> None:
             log_info(logger, "connecting to telegram")
             await client.connect()
 
-            # Telegram only pushes updates after an authenticated
-            # high-level request; kick-start it if already authorized.
-            if await client.is_user_authorized():
-                await client.get_me()
-
             web_auth = WebAuth(client)
             web_app = web.Application()
             web_app.add_routes(web_auth.routes())
@@ -96,6 +101,15 @@ async def run(n8n_logger: logging.Logger) -> None:
             site = web.TCPSite(runner, "0.0.0.0", config.web_auth_port)
             await site.start()
             log_info(logger, "web auth server listening", port=config.web_auth_port)
+
+            if not await client.is_user_authorized():
+                log_info(logger, "waiting for login via the web form")
+                await wait_until_authorized(client)
+                log_info(logger, "telegram login completed")
+
+            # Telegram only pushes updates after an authenticated
+            # high-level request; this also satisfies that requirement.
+            await client.get_me()
 
             heartbeat_task = asyncio.create_task(run_heartbeat(client))
 
