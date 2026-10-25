@@ -45,8 +45,10 @@ docker compose -f docker-compose.test.yml run --rm tests
 
 ## Development notes
 
-- `uv.lock` is checked in and must be regenerated inside Docker if `pyproject.toml` changes: `docker run --rm -v "$PWD":/app -w /app ghcr.io/astral-sh/uv:python3.13-bookworm-slim uv lock`.
-- The `Dockerfile` has three stages: `deps` (prod-only, cached), `test` (adds dev deps + runs pytest), `runtime` (prod deps + app, non-root user). `docker compose build` targets `runtime` by default.
+- `uv.lock` is checked in and must be regenerated inside Docker if `pyproject.toml` changes: `docker run --rm -v "$PWD":/app -w /app cgr.dev/chainguard/python:latest-dev uv lock`.
+- The `Dockerfile` uses Chainguard's Wolfi-based Python images: `latest-dev` (has `uv`/`pip`/`apk`/a shell) for `deps`/`test`/`build`, and the distroless `latest` (no shell, no package manager, `nonroot`/`65532` by default) for `runtime` - minimizing attack surface. `docker compose build` targets `runtime` by default.
+- Chainguard's free tier only offers the rolling `latest`/`latest-dev` tags for `python` (version-pinned tags like `3.13` require a paid plan), so the runtime's Python version tracks whatever Chainguard currently ships (3.15 as of writing) rather than a pinned version.
+- **Migrating an existing volume:** if `telegram-forwarder-session` was created by an older image (`uid 1000`), fix ownership once in place rather than recreating the volume (which would lose the login session): `docker run --rm -v telegram-forwarder_telegram-forwarder-session:/data alpine chown -R 65532:65532 /data`.
 
 ## Behavior notes
 

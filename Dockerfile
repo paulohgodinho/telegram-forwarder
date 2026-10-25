@@ -1,6 +1,8 @@
 # syntax=docker/dockerfile:1
 
-FROM ghcr.io/astral-sh/uv:python3.13-bookworm-slim AS base
+# Chainguard Wolfi-based: "latest-dev" (uv/pip/apk/shell) for building,
+# "latest" (distroless, nonroot by default) for the actual runtime.
+FROM cgr.dev/chainguard/python:latest-dev AS base
 WORKDIR /app
 ENV UV_COMPILE_BYTECODE=1 \
     UV_LINK_MODE=copy \
@@ -19,17 +21,18 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 COPY . .
 RUN --mount=type=cache,target=/root/.cache/uv uv sync --frozen
 ENV PATH="/app/.venv/bin:${PATH}"
-CMD ["uv", "run", "pytest"]
+ENTRYPOINT ["uv", "run", "pytest"]
 
-# ---- runtime: prod deps + project only, no dev deps, non-root user ----
-FROM deps AS runtime
+# ---- build: full venv (incl. project itself) + source + session dir,
+# assembled here since the final runtime image has no shell/uv to do it ----
+FROM deps AS build
 COPY . .
-RUN --mount=type=cache,target=/root/.cache/uv uv sync --frozen --no-dev
-RUN useradd --create-home --uid 1000 appuser \
-    # Pre-create the volume mount point so Docker seeds a fresh named
-    # volume as appuser-writable, not root:root.
-    && mkdir -p /app/session/data \
-    && chown -R appuser:appuser /app
-USER appuser
+RUN --mount=type=cache,target=/root/.cache/uv \
+    mkdir -p session/data && uv sync --frozen --no-dev
+
+# ---- runtime: distroless, no shell/package manager, nonroot by default ----
+FROM cgr.dev/chainguard/python:latest AS runtime
+WORKDIR /app
+COPY --from=build --chown=nonroot:nonroot /app /app
 ENV PATH="/app/.venv/bin:${PATH}"
 ENTRYPOINT ["python", "main.py"]
