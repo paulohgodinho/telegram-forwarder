@@ -48,7 +48,7 @@ docker compose -f docker-compose.test.yml run --rm tests
 - `uv.lock` is checked in and must be regenerated inside Docker if `pyproject.toml` changes: `docker run --rm -v "$PWD":/app -w /app cgr.dev/chainguard/python:latest-dev uv lock`.
 - The `Dockerfile` uses Chainguard's Wolfi-based Python images: `latest-dev` (has `uv`/`pip`/`apk`/a shell) for `deps`/`test`/`build`, and the distroless `latest` (no shell, no package manager, `nonroot`/`65532` by default) for `runtime` - minimizing attack surface. `docker compose build` targets `runtime` by default.
 - Chainguard's free tier only offers the rolling `latest`/`latest-dev` tags for `python` (version-pinned tags like `3.13` require a paid plan), so the runtime's Python version tracks whatever Chainguard currently ships (3.15 as of writing) rather than a pinned version.
-- **Migrating an existing volume:** if `telegram-forwarder-session` was created by an older image (`uid 1000`), fix ownership once in place rather than recreating the volume (which would lose the login session): `docker run --rm -v telegram-forwarder_telegram-forwarder-session:/data alpine chown -R 65532:65532 /data`.
+- **Migrating an existing volume:** if `telegram-forwarder-session` was created by an older image (`uid 1000`), fix ownership once in place rather than recreating the volume (which would lose the login session): `docker run --rm -v telegram-forwarder_telegram-forwarder-session:/data alpine chown -R 65532:65532 /data`. The app detects this on startup and logs the exact command to run (with the correct uid/gid) instead of a bare SQLite error.
 
 ## Behavior notes
 

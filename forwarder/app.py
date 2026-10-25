@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import signal
 from pathlib import Path
 
@@ -56,6 +57,26 @@ def install_signal_handlers(loop: asyncio.AbstractEventLoop, main_task: asyncio.
         loop.add_signal_handler(sig, shutdown)
 
 
+def check_session_dir_writable() -> None:
+    """Fails fast with an actionable message instead of a cryptic SQLite
+    error if SESSION_DIR's ownership doesn't match the current user - e.g.
+    after switching base images to one with a different nonroot UID.
+    """
+    probe = SESSION_DIR / ".write_test"
+    try:
+        probe.write_text("ok")
+        probe.unlink()
+    except OSError as exc:
+        st = SESSION_DIR.stat()
+        raise RuntimeError(
+            f"{SESSION_DIR} is owned by uid={st.st_uid}/gid={st.st_gid} but this "
+            f"process runs as uid={os.getuid()}/gid={os.getgid()} - the session "
+            "volume likely predates a base image change. Fix with: docker run "
+            "--rm -v <volume_name>:/data alpine chown -R "
+            f"{os.getuid()}:{os.getgid()} /data"
+        ) from exc
+
+
 async def wait_until_authorized(client: TelegramClient) -> None:
     """Blocks until the web login flow completes. run_until_disconnected()
     internally calls GetStateRequest(), which requires a logged-in session -
@@ -68,6 +89,7 @@ async def wait_until_authorized(client: TelegramClient) -> None:
 async def run(n8n_logger: logging.Logger) -> None:
     config = Config.from_env()
     SESSION_DIR.mkdir(parents=True, exist_ok=True)
+    check_session_dir_writable()
 
     loop = asyncio.get_running_loop()
     install_exception_handler(loop)

@@ -1,8 +1,16 @@
 import asyncio
 import logging
+import os
+from pathlib import Path
+
+import pytest
 
 from forwarder import app
-from forwarder.app import install_exception_handler, wait_until_authorized
+from forwarder.app import (
+    check_session_dir_writable,
+    install_exception_handler,
+    wait_until_authorized,
+)
 
 
 async def test_install_exception_handler_logs_exception(caplog):
@@ -59,3 +67,27 @@ async def test_wait_until_authorized_returns_immediately_if_already_authorized()
     client = _FakeClient(authorized_after=1)
     await wait_until_authorized(client)
     assert client._calls == 1
+
+
+def test_check_session_dir_writable_passes_when_writable(tmp_path, monkeypatch):
+    monkeypatch.setattr(app, "SESSION_DIR", tmp_path)
+    check_session_dir_writable()  # must not raise
+    assert not (tmp_path / ".write_test").exists()
+
+
+def test_check_session_dir_writable_raises_actionable_message(tmp_path, monkeypatch):
+    monkeypatch.setattr(app, "SESSION_DIR", tmp_path)
+
+    def fail_write(self, *args, **kwargs):
+        raise PermissionError("Permission denied")
+
+    monkeypatch.setattr(Path, "write_text", fail_write)
+
+    with pytest.raises(RuntimeError) as exc_info:
+        check_session_dir_writable()
+
+    message = str(exc_info.value)
+    assert str(tmp_path) in message
+    assert f"uid={os.getuid()}" in message
+    assert f"gid={os.getgid()}" in message
+    assert "chown -R" in message
