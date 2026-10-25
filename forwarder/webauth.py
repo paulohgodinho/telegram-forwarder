@@ -49,7 +49,12 @@ class WebAuth:
         self._needs_password = False
 
     async def index(self, _request: web.Request) -> web.Response:
-        if await self._client.is_user_authorized():
+        try:
+            authorized = await self._client.is_user_authorized()
+        except Exception as exc:  # noqa: BLE001
+            log_error(logger, "telegram is_user_authorized check failed", error=str(exc))
+            authorized = False
+        if authorized:
             return web.Response(text=_PAGE_AUTHENTICATED, content_type="text/html")
         if self._needs_password:
             html = _PAGE_PASSWORD
@@ -65,7 +70,12 @@ class WebAuth:
         if not phone:
             return web.Response(text="phone is required", status=400)
 
-        sent = await self._client.send_code_request(phone)
+        try:
+            sent = await self._client.send_code_request(phone)
+        except Exception as exc:  # noqa: BLE001
+            log_error(logger, "telegram send code request failed", error=str(exc))
+            return web.Response(text=f"Error: {exc}", status=400)
+
         self._phone = phone
         self._phone_code_hash = sent.phone_code_hash
         log_info(logger, "telegram login code requested", phone=phone)

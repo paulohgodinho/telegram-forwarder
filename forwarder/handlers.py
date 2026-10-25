@@ -59,13 +59,27 @@ async def _handle_message(
     n8n_logger: logging.Logger,
     n8n_webhook_url: str,
 ) -> None:
+    # Name resolution failures must never drop the message - degrade to a
+    # generic fallback and keep going.
     group_name = ""
     if not event.is_private:
-        chat = await event.get_chat()
-        group_name = display_name(chat)
+        try:
+            chat = await event.get_chat()
+            # Matches Go: group_name stays "" on failure/unresolved chat,
+            # never "Unknown" (that fallback is reserved for sender_name).
+            if chat is not None:
+                group_name = display_name(chat)
+        except Exception as exc:  # noqa: BLE001
+            log_exception(logger, "resolve chat", exc)
 
-    sender = await event.get_sender()
-    sender_name = display_name(sender) if sender is not None else (group_name or "Unknown")
+    sender_name = "Unknown"
+    try:
+        sender = await event.get_sender()
+        sender_name = display_name(sender) if sender is not None else (group_name or "Unknown")
+    except Exception as exc:  # noqa: BLE001
+        log_exception(logger, "resolve sender", exc)
+        if group_name:
+            sender_name = group_name
 
     image_url = ""
     if event.photo is not None:

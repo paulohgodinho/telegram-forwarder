@@ -116,3 +116,33 @@ async def test_code_requiring_2fa_shows_password_form_then_succeeds():
         assert tg.sign_in_calls[-1][1] == {"password": "secret"}
     finally:
         await client.close()
+
+
+class FailingSendCodeClient(FakeTelegramClient):
+    async def send_code_request(self, phone):
+        raise ConnectionError("Cannot send requests while disconnected")
+
+
+async def test_phone_send_code_failure_returns_400_not_500():
+    client = await _make_client(FailingSendCodeClient())
+    try:
+        resp = await client.post("/phone", data={"phone": "+15555550100"})
+        assert resp.status == 400
+        assert "Cannot send requests while disconnected" in await resp.text()
+    finally:
+        await client.close()
+
+
+class FailingAuthCheckClient(FakeTelegramClient):
+    async def is_user_authorized(self):
+        raise RuntimeError("session file corrupted")
+
+
+async def test_index_authorized_check_failure_falls_back_to_phone_form():
+    client = await _make_client(FailingAuthCheckClient())
+    try:
+        resp = await client.get("/")
+        assert resp.status == 200
+        assert "Telegram Login" in await resp.text()
+    finally:
+        await client.close()

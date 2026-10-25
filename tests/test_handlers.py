@@ -20,13 +20,15 @@ class FakeEvent:
         text="hello",
         date=None,
         media_bytes=b"imgdata",
+        chat_raises=None,
+        sender_raises=None,
     ):
         self.is_private = is_private
         self.photo = photo
         self.raw_text = text
         self.message = SimpleNamespace(date=date or datetime(2026, 10, 24, tzinfo=timezone.utc))
-        self.get_chat = AsyncMock(return_value=chat)
-        self.get_sender = AsyncMock(return_value=sender)
+        self.get_chat = AsyncMock(return_value=chat, side_effect=chat_raises)
+        self.get_sender = AsyncMock(return_value=sender, side_effect=sender_raises)
         self.download_media = AsyncMock(return_value=media_bytes)
 
 
@@ -88,6 +90,19 @@ async def test_handle_message_group_chat_sets_channel_name(caplog):
     assert record.fields["channel"] == "Family Group"
 
 
+async def test_handle_message_unresolved_group_chat_stays_empty_not_unknown(caplog):
+    caplog.set_level(logging.DEBUG)
+    # get_chat() can legitimately return None; group_name must stay "" -
+    # "Unknown" is reserved for sender_name only.
+    event = FakeEvent(is_private=False, chat=None, sender=_user())
+
+    await _handle_message(event, FakeUploader(), object(), logging.getLogger("t"), "https://hook")
+    await _drain_tasks()
+
+    record = next(r for r in caplog.records if r.msg == "received telegram message")
+    assert record.fields["channel"] == ""
+
+
 async def test_handle_message_truncates_long_text(caplog):
     caplog.set_level(logging.DEBUG)
     event = FakeEvent(is_private=True, sender=_user(), text="a" * 100)
@@ -140,6 +155,47 @@ async def test_handle_message_upload_failure_does_not_block_forwarding(caplog):
         r.msg == "exception recovered" and r.fields["where"] == "upload photo"
         for r in caplog.records
     )
+    assert any(r.msg == "received telegram message" for r in caplog.records)
+
+
+async def test_handle_message_chat_resolution_failure_still_forwards(caplog):
+    caplog.set_level(logging.DEBUG)
+    event = FakeEvent(
+        is_private=False,
+        sender=_user(),
+        chat_raises=RuntimeError("flood wait"),
+        text="still here",
+    )
+
+    await _handle_message(event, FakeUploader(), object(), logging.getLogger("t"), "https://hook")
+    await _drain_tasks()
+
+    assert any(
+        r.msg == "exception recovered" and r.fields["where"] == "resolve chat"
+        for r in caplog.records
+    )
+    record = next(r for r in caplog.records if r.msg == "received telegram message")
+    assert record.fields["channel"] == ""
+    assert record.fields["message"] == "still here"
+
+
+async def test_handle_message_sender_resolution_failure_still_forwards(caplog):
+    caplog.set_level(logging.DEBUG)
+    event = FakeEvent(
+        is_private=False,
+        chat=_channel(title="Family Group"),
+        sender_raises=RuntimeError("network blip"),
+        text="still here too",
+    )
+
+    await _handle_message(event, FakeUploader(), object(), logging.getLogger("t"), "https://hook")
+    await _drain_tasks()
+
+    assert any(
+        r.msg == "exception recovered" and r.fields["where"] == "resolve sender"
+        for r in caplog.records
+    )
+    # Falls back to group_name since the chat resolved fine.
     assert any(r.msg == "received telegram message" for r in caplog.records)
 
 
