@@ -67,16 +67,29 @@ async def _drain_tasks():
         await asyncio.gather(*pending, return_exceptions=True)
 
 
-async def test_handle_message_private_chat_has_no_channel_name(caplog):
+async def test_handle_message_private_chat_uses_other_party_name(caplog):
     caplog.set_level(logging.DEBUG)
-    event = FakeEvent(is_private=True, sender=_user(), text="hi there")
+    event = FakeEvent(is_private=True, chat=_user(), sender=_user(), text="hi there")
 
     await _handle_message(event, FakeUploader(), object(), logging.getLogger("t"), "https://hook")
     await _drain_tasks()
 
     record = next(r for r in caplog.records if r.msg == "received telegram message")
-    assert record.fields["channel"] == ""
+    assert record.fields["channel"] == "Jane Doe"
     assert record.fields["message"] == "hi there"
+
+
+async def test_handle_message_falls_back_to_get_entity_when_chat_not_cached(caplog):
+    caplog.set_level(logging.DEBUG)
+    event = FakeEvent(is_private=False, chat=None, sender=_user())
+    event.message.peer_id = object()
+    event.client = SimpleNamespace(get_entity=AsyncMock(return_value=_channel(title="Super Group")))
+
+    await _handle_message(event, FakeUploader(), object(), logging.getLogger("t"), "https://hook")
+    await _drain_tasks()
+
+    record = next(r for r in caplog.records if r.msg == "received telegram message")
+    assert record.fields["channel"] == "Super Group"
 
 
 async def test_handle_message_group_chat_sets_channel_name(caplog):
@@ -203,8 +216,12 @@ async def test_safe_handle_message_recovers_exceptions(caplog):
     caplog.set_level(logging.DEBUG)
 
     class ExplodingEvent:
+        photo = None
+        get_chat = AsyncMock(return_value=None)
+        get_sender = AsyncMock(return_value=None)
+
         @property
-        def is_private(self):
+        def raw_text(self):
             raise RuntimeError("boom")
 
     await safe_handle_message(

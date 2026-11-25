@@ -61,16 +61,7 @@ async def _handle_message(
 ) -> None:
     # Name resolution failures must never drop the message - degrade to a
     # generic fallback and keep going.
-    group_name = ""
-    if not event.is_private:
-        try:
-            chat = await event.get_chat()
-            # Matches Go: group_name stays "" on failure/unresolved chat,
-            # never "Unknown" (that fallback is reserved for sender_name).
-            if chat is not None:
-                group_name = display_name(chat)
-        except Exception as exc:  # noqa: BLE001
-            log_exception(logger, "resolve chat", exc)
+    group_name = await _resolve_group_name(event)
 
     sender_name = "Unknown"
     try:
@@ -106,6 +97,35 @@ async def _handle_message(
     asyncio.create_task(
         forward_to_n8n(http_session, n8n_logger, n8n_webhook_url, payload)
     )
+
+
+async def _resolve_group_name(event: events.NewMessage.Event) -> str:
+    """Name of the conversation: group/supergroup/channel title, or the other
+    party's name for 1:1 chats. Returns "" only if every lookup fails
+    ("Unknown" is reserved for sender_name).
+    """
+    chat = None
+    try:
+        chat = await event.get_chat()
+    except Exception as exc:  # noqa: BLE001
+        log_exception(logger, "resolve chat", exc)
+
+    # get_chat() returns None when the entity isn't in the session cache
+    # (common for supergroups/channels seen via "min" updates); fetch it
+    # explicitly from the server using the message's peer.
+    if chat is None:
+        client = getattr(event, "client", None)
+        peer = getattr(getattr(event, "message", None), "peer_id", None)
+        if client is not None and peer is not None:
+            try:
+                chat = await client.get_entity(peer)
+            except Exception as exc:  # noqa: BLE001
+                log_exception(logger, "fetch chat entity", exc)
+
+    if chat is None:
+        return ""
+    name = display_name(chat)
+    return "" if name == "Unknown" else name
 
 
 async def _upload_photo(event: events.NewMessage.Event, uploader: S3Uploader) -> str:
